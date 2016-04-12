@@ -1,0 +1,103 @@
+#!/usr/bin/perl -w
+#
+# By Alexander Pope adapted from Trevor Cordes's code
+
+# use only on text files;
+# edit the $editor var to set to your favorite editor (vi, emacs, nano);
+# when first run on a text file, will encrypt it and delete original;
+# when used on encrypted files (ending in .gpg)	will decrypt, load
+#  into your editor, then re-encrypt once edited;
+# when dealing with encrypted files, makes a backup copy in /tmp which
+#  it leaves there for safety;
+# note:	when editing, the file exists in plaintext on the disk,	so it's
+#  not as nice/secure as an in-memory system would be during the edit;
+# note:	backspace & arrows don't work when entering pw,	so just	^C if
+#  you make a typo;
+# relies on gpg's convention (-c) encryption, which is only as good as
+#  your	password so make it good/long depending	on how secure you want
+#  to be against brute force or	dictionary attacks;
+# if you use emacs or an editor	that automatically makes backup files,
+#  you must disable that or use	a simpler editor, otherwise you'll
+#  leave plaintext file droppings everywhere;
+
+$editor="/usr/bin/nano -t -z -w";
+
+$ENV{SHELL}='/bin/bash';
+
+$ef=shift;
+-f $ef or die "not a file: $ef";
+
+if (($uf)=($ef=~/^(.+?)(\.gpg)$/i)) {
+
+  -f $uf and die "plaintext file already exists, will not overwrite ($uf)";
+
+  $noslashesf=$ef;
+  $noslashesf=~tr#/#_#;
+
+  $efexists=1;
+
+} else {
+
+  $uf=$ef;
+  $ef="$ef.gpg";
+  $efexists=0;
+
+}
+
+
+# get pw
+print "Enter password: ";
+system "stty",'-icanon','-echo','eol',"\001";
+$SIG{'INT'}='cleanup';
+
+do {
+  $char=getc(STDIN);
+  print '*' if $char ne "\n";
+  $pgppw.=$char;
+} until $char eq "\n";
+print "\n";
+system "stty",'icanon','echo','eol','^@';
+$unsttyd=1;
+
+
+if ($efexists) {
+
+  $baknum=0;
+  $baknum++ while (-f "/tmp/$noslashesf.bak$baknum$$");
+  system "/bin/cp -p $ef /tmp/$noslashesf.bak$baknum$$";
+
+  open(PW,"| gpg --passphrase-fd 0 --batch $ef 2>/dev/null") or die;
+  print PW $pgppw;
+  close(PW);
+
+  die "bad password\n" if !-s $uf or (-s $uf)<(-s $ef)-100;
+
+  system "$editor $uf";
+
+  unlink $ef if -f $ef;
+
+}
+
+
+open(PW,"| gpg -c --passphrase-fd 0 -z9 --batch $uf >/dev/null 2>&1")
+ or die;
+print PW $pgppw;
+close(PW);
+
+-f $ef
+ or die "encryptions seems to have failed, leaving plaintext as is ($uf)";
+
+unlink $uf if -f $uf;
+
+#system "ls -ld $uf*";
+#print "\nLooks like success!\n";
+
+&cleanup;
+
+sub cleanup{
+  if (!$unsttyd) {
+    system "stty",'icanon','echo','eol','^@';
+    print "\n";
+  }
+  exit;
+}
